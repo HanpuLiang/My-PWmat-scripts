@@ -1,0 +1,293 @@
+#!/usr/bin/python
+
+'''
+@author: Hanpu Liang
+@date: 2020/11/07
+@description: convert the structural file from the VASP format POSCAR atom.config to the PWmat format. Example: $ cv2p POSCAR
+'''
+
+import numpy as np
+import sys
+import datetime
+import os
+
+def main():
+    Open_screen()
+    # read input parameter
+    poscar_files, input_paramaters = get_input_information()
+    # read POSCAR file
+    for file_name in poscar_files:
+        with open(file_name, 'r') as obj:
+            poscar = obj.readlines()
+            systemEcho(' [DPT] - Reading {0}...'.format(file_name))
+        # get all information of POSCAR
+        lattice, atom_type, atom_num, total_atom_num, position = get_POSCAR_infomation(poscar)
+        # read information into atom.config
+        creat_PWmat_file(lattice, atom_type, atom_num, total_atom_num, position, file_name, input_paramaters)
+
+def get_input_information():
+    argv_list = sys.argv[1:]
+    dim = '1 1 1'
+    axis = False
+    poscars = []
+    para_index = -1
+    # default parameters
+    if len(argv_list) == 0:
+        return ['POSCAR'], [dim, axis]
+    for i, para in enumerate(argv_list):
+        if para_index == i:
+            continue
+        # --dim : choose the relax direction
+        if para == '--dim':
+            if i+1 > len(argv_list)-1:
+                systemError(' There is --dim with no parameters.')
+            if argv_list[i+1] == 'x':
+                dim = '1 0 0'
+            elif argv_list[i+1] == 'y':
+                dim = '0 1 0'
+            elif argv_list[i+1] == 'z':
+                dim = '0 0 1'
+            elif argv_list[i+1] == 'xy':
+                dim = '1 1 0'
+            elif argv_list[i+1] == 'xz':
+                dim = '1 0 1'
+            elif argv_list[i+1] == 'yz':
+                dim = '0 1 1'
+            elif argv_list[i+1] == 'none':
+                dim = '0 0 0'
+            else:
+                systemError(' Wrong --dim parameters.')
+            para_index = i+1
+            systemEcho(' [DPT] - Set paramaeter: --dim {0}'.format(argv_list[i+1]))
+        if para == '--axis':
+            if i+1 > len(argv_list)-1:
+                systemError(' There is --axis with no parameters.')
+            if argv_list[i+1] == 'a':
+                axis = [1, 0, 0]
+            elif argv_list[i+1] == 'b':
+                axis = [0, 1, 0]
+            elif argv_list[i+1] == 'c':
+                axis = [0, 0, 1]
+            elif argv_list[i+1] == 'ab':
+                axis = [1, 1, 0]
+            elif argv_list[i+1] == 'ac':
+                axis = [1, 0, 1]
+            elif argv_list[i+1] == 'bc':
+                axis = [0, 1, 1]
+            elif argv_list[i+1] == 'abc':
+                axis = [1, 1, 1]
+            elif argv_list[i+1] == 'none':
+                axis = [0, 0, 0]
+            else:
+                systemError(' Wrong --axis parameters.')
+            para_index = i+1
+            systemEcho(' [DPT] - Set paramaeter: --axis {0}, i.e. only relax {0} axis.'.format(argv_list[i+1]))
+        # not choose the name around the parameters
+        if argv_list[i][0] != '-':
+            poscars.append(para)
+    if len(poscars) == 0:
+        poscars.append('POSCAR')
+    return poscars, [dim, axis]
+
+def get_POSCAR_infomation(poscar):
+    # get cell lattice
+    expand_rate = float(poscar[1].split()[0])
+    lattice = np.array([[float(item) for item in line.split()] for line in poscar[2:5]])*expand_rate
+    # get each atom number
+    atom_num = [int(num) for num in poscar[6].split()]
+    # get each atom type
+    atom_type = []
+    for i, atom in enumerate(poscar[5].split()):
+        atom_type += ([atom]*atom_num[i])
+    # total atom number
+    total_atom_num = int(np.sum(atom_num))
+    # get all position for all atoms
+    position = np.array([[float(item) for item in line.split()] for line in poscar[8:8+total_atom_num]])
+    return lattice, atom_type, atom_num, total_atom_num, position
+
+def creat_PWmat_file(lattice, atom_type, atom_num, total_atom_num, position, file_name, input_paramaters):
+    # lattice string
+    lattice_pw = '\n'.join([' '.join([' {0:20.15f} '.format(item) for item in line])for line in lattice])
+    # relaxation direction string
+    dim = input_paramaters[0]
+    axis = input_paramaters[1]
+    if axis != False:
+        axis = np.diag(np.array(input_paramaters[1]))
+        # relaxed axis
+        axis_pw = '\n'.join([' '.join([' {0:5.0f} '.format(item) for item in line])for line in axis])
+        axis_pw = 'stress_mask\n' + axis_pw
+    else:
+        axis_pw = ''
+    # position string
+    position_pw = ''
+    for i in range(total_atom_num):
+        position_pw += '{0:5.0f} {1:20.15f} {2:20.15f} {3:20.15f} {4}\n'.format(get_atom_number(atom_type[i]), 
+                        position[i,0], position[i,1], position[i,2], dim)
+    PWmat_file = '''{0}
+lattice
+{1}
+position
+{2}
+{3}'''.format(total_atom_num, lattice_pw, position_pw, axis_pw)
+    with open('atom.config-{0}'.format(file_name), 'w') as obj:
+        obj.write(PWmat_file)
+    systemEcho(' [DPT] - File atom.config-{0} saved!'.format(file_name))
+    
+    
+def get_atom_number(atom):
+    atom_dict = {'H':1, 
+            'He':2, 
+            'Li':3, 
+            'Be':4, 
+            'B':5, 
+            'C':6, 
+            'N':7, 
+            'O':8, 
+            'F':9, 
+            'Ne':10, 
+            'Na':11, 
+            'Mg':12, 
+            'Al':13, 
+            'Si':14, 
+            'P':15, 
+            'S':16, 
+            'Cl':17, 
+            'Ar':18, 
+            'K':19, 
+            'Ca':20, 
+            'Sc':21, 
+            'Ti':22, 
+            'V':23, 
+            'Cr':24, 
+            'Mn':25, 
+            'Fe':26, 
+            'Co':27, 
+            'Ni':28, 
+            'Cu':29, 
+            'Zn':30, 
+            'Ga':31, 
+            'Ge':32, 
+            'As':33, 
+            'Se':34, 
+            'Br':35, 
+            'Kr':36, 
+            'Rb':37, 
+            'Sr':38, 
+            'Y':39, 
+            'Zr':40, 
+            'Nb':41, 
+            'Mo':42, 
+            'Tc':43, 
+            'Ru':44, 
+            'Rh':45, 
+            'Pd':46, 
+            'Ag':47, 
+            'Cd':48, 
+            'In':49, 
+            'Sn':50, 
+            'Sb':51, 
+            'Te':52, 
+            'I':53, 
+            'Xe':54, 
+            'Cs':55, 
+            'Ba':56, 
+            'La':57, 
+            'Ce':58, 
+            'Pr':59, 
+            'Nd':60, 
+            'Pm':61, 
+            'Sm':62, 
+            'Eu':63, 
+            'Gd':64, 
+            'Tb':65, 
+            'Dy':66, 
+            'Ho':67, 
+            'Er':68, 
+            'Tm':69, 
+            'Yb':70, 
+            'Lu':71, 
+            'Hf':72, 
+            'Ta':73, 
+            'W':74, 
+            'Re':75, 
+            'Os':76, 
+            'Ir':77, 
+            'Pt':78, 
+            'Au':79, 
+            'Hg':80, 
+            'Tl':81, 
+            'Pb':82, 
+            'Bi':83, 
+            'Po':84, 
+            'At':85, 
+            'Rn':86, 
+            'Fr':87, 
+            'Ra':88, 
+            'Ac':89, 
+            'Th':90, 
+            'Pa':91, 
+            'U':92, 
+            'Np':93, 
+            'Pu':94, 
+            'Am':95, 
+            'Cm':96, 
+            'Bk':97, 
+            'Cf':98, 
+            'Es':99, 
+            'Fm':100, 
+            'Md':101, 
+            'No':102, 
+            'Lr':103, 
+            'Rf':104, 
+            'Db':105, 
+            'Sg':106, 
+            'Bh':107, 
+            'Hs':108, 
+            'Mt':109, 
+            'Ds':110, 
+            'Rg':111, 
+            'Cn':112}
+    return atom_dict[atom]
+
+
+
+'''
+Log function
+'''
+
+def Open_screen():
+    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print('''
+       *-----------------*-----*
+       |  Data           |  D  |        Version : GPU-Extra
+       |     Processing  |  P  |  Latest Update : 2020-11-13 
+       |         Toolkit |  T  |         Author : Liang HP
+       *-----------------*-----*
+       |     G - P - U   |  G  |        [Suited For PWmat]
+       *-----------------*-----*
+              Current Time: {0}
+'''.format(now_time))
+
+def systemEcho(content):
+    ''' system information print to screen'''
+    print(content)
+    systemLog(content)
+
+def systemError(content):
+    ''' exit program when somewhere errors'''
+    content = '**ERROR** : ' + content
+    print(content)
+    print('Program Exits.')
+    exit(0)
+
+def systemLog(content):
+    ''' output information into log file'''
+    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    out_str = now_time + '---' + content + '\n'
+    with open('./system.log', 'a') as obj:
+        obj.write(out_str)
+
+
+if __name__ == '__main__':
+    main()
+    

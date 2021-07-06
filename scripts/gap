@@ -1,0 +1,104 @@
+#!/usr/bin/env python
+
+'''
+@author: Hanpu Liang
+@date: 2020/11/13
+@description: extract some electronic structure information from the bandstructure_1.txt and other necessary files. For example, the Fermi level, electron number, and the band gap.
+'''
+
+import numpy as np
+import os, datetime
+
+def get_valence_band():
+    if not os.path.exists('REPORT'):
+        systemError(' File REPORT Note Found!')
+    with open('REPORT', 'r') as obj:
+        ct = obj.readlines()
+    for line in ct:
+        if 'NUM_ELECTRON' in line:
+            num_electron = int(float(line.split()[2]))
+            valence_band = int(np.floor(num_electron/2))
+            systemEcho(' [DPT] - Number of Electron : {0}'.format(num_electron))
+            systemEcho(' [DPT] - Number of Valence Band : {0}'.format(valence_band))
+            break
+    else:
+        systemError(' There is no NUM_ELECTRON parameter in REPORT!')
+    return valence_band
+        
+def get_band_structure(valence_band):
+    if not os.path.exists('bandstructure_1.txt'):
+        systemError(' File bandstructure_1.txt Note Found!')
+    with open('bandstructure_1.txt', 'r') as obj:
+        ct = obj.readlines()
+    ct = [[float(item) for item in line.split()] for line in ct]
+    for line in ct:
+        if len(line) == 0:
+            ct.remove([])
+    band = np.array(ct)
+    n_k = 0
+    for i in range(band.shape[0]-1):
+        if band[i,0] > band[i+1,0]:
+            n_k = i+1
+            break
+    k = band[0:n_k,0]
+    VB = band[(valence_band-1)*n_k:valence_band*n_k,1] 
+    CB = band[valence_band*n_k:(valence_band+1)*n_k,1]
+    VBM = np.max(VB)
+    CBM = np.min(CB)
+    systemEcho(' [DPT] - VBM : {0:10.6f}'.format(VBM))
+    systemEcho(' [DPT] - CBM : {0:10.6f}'.format(CBM))
+    systemEcho(' [DPT] - GAP : {0:10.6f}'.format(CBM-VBM))
+    VBM_loc = np.where(VBM==VB)[0]
+    CBM_loc = np.where(CBM==CB)[0]
+    band_flag = False
+    for v in VBM_loc:
+        for c in CBM_loc:
+            if abs(v-c) < 4:
+                band_flag = True
+    if band_flag == True:
+        systemEcho(' [DPT] - This is a Direct Band Gap!')
+    else:
+        systemEcho(' [DPT] - This is a Indirect Band Gap!')
+
+
+def get_gap():
+    valence_band = get_valence_band()
+    structure = get_band_structure(valence_band)
+
+
+
+def Open_screen():
+    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print('''
+       *-----------------*-----*
+       |  Data           |  D  |        Version : GPU-Extra
+       |     Processing  |  P  |  Latest Update : 2020-11-13 
+       |         Toolkit |  T  |         Author : Liang HP
+       *-----------------*-----*
+       |     G - P - U   |  G  |        [Suited For PWmat]
+       *-----------------*-----*
+              Current Time: {0}
+'''.format(now_time))
+
+def systemEcho(content):
+    ''' system information print to screen'''
+    print(content)
+    systemLog(content)
+
+def systemError(content):
+    ''' exit program when somewhere errors'''
+    content = '**ERROR** : ' + content
+    print(content)
+    print('Program Exits.')
+    exit(0)
+
+def systemLog(content):
+    ''' output information into log file'''
+    now_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    out_str = now_time + '---' + content + '\n'
+    with open('./system.log', 'a') as obj:
+        obj.write(out_str)
+
+if __name__ == '__main__':
+    Open_screen()
+    get_gap()
